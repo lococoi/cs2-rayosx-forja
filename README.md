@@ -1,11 +1,11 @@
 # cs2-rayosX-forja (forjaX)
 
-Port a **[Forja](https://github.com/forja-lang/forja)** del inyector **cs2-rayoX** (C++) — X-Ray para Counter-Strike 2 por parcheo directo de `client.dll`.
+Port a **[Forja](https://github.com/forja-lang/forja)** del inyector **[cs2-rayoX](https://github.com/lococoi/cs2-rayoX/)**  (C++) — X-Ray para Counter-Strike 2 por parcheo directo de `client.dll`.
 
-**Créditos: lococoi** (autor del original en C++)
+<img width="1223" height="732" alt="image" src="https://github.com/user-attachments/assets/6930c485-6545-4ac7-bc64-bf8be0045062" />
 
 > [!WARNING]
-> ⚠️ **Esto es un cheat.** Su uso viola los Términos de Servicio de Valve y puede resultar en **baneo permanente de la cuenta por VAC**. Este proyecto es **exclusivamente con fines educativos** (aprender APIs de Windows como `ReadProcessMemory`, `WriteProcessMemory`, `Toolhelp32` y las funciones nativas de Forja). Usalo bajo tu propia responsabilidad y solo en entornos de práctica/offline.
+> ⚠️ **Esto podría ser perjudicial.** Su uso podría violar los Términos de Servicio de Valve y puede resultar en **baneo permanente de la cuenta por VAC**. Este proyecto es **exclusivamente con fines educativos** (aprender APIs de Windows como `ReadProcessMemory`, `WriteProcessMemory`, `Toolhelp32`). Usalo bajo tu propia responsabilidad y solo en entornos de práctica/offline.
 
 ---
 
@@ -40,7 +40,7 @@ La firma se define en [`main.fa`](main.fa):
 
 ## Uso (ejecutable precompilado)
 
-Descargá `cs2-rayosX-forja.exe` de la [Release](https://github.com/forja-lang/cs2-rayosx-forja/releases), ejecutalo como Administrador con CS2 abierto y presioná **F1**.
+Descargá `cs2-rayosX-forja.exe` de la [Release](https://github.com/forja-lang/cs2-rayosx-forja/releases), ejecutalo con CS2 abierto y presioná **F1**.
 
 ## Compilación
 
