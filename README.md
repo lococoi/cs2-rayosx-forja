@@ -69,13 +69,4 @@ build.bat compilar   → genera forjaX.exe autónomo
 └── .github/workflows/    → CI: compila el .exe con el último release de Forja y publica Releases
 ```
 
-## Notas sobre ForjaFast (limitaciones sorteadas)
-
-- `constante` global no se resuelve como argumento de funciones nativas → la configuración son variables locales de `main()`.
-- Dentro de funciones **con parámetros**, los argumentos de nativas llegan corruptos → el flujo está inlined en `main()`.
-- `escribir` acumula la salida en buffer (con loop infinito nunca se vacía) → se usa `_imprimir_stdout` (flush en vivo).
-- Las variables globales no persisten su valor en bucles → el estado del inyector es local a `main()`.
-
----
-
 Valve: arregla tu juego de mierda.
