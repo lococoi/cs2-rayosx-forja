@@ -1,0 +1,182 @@
+# ═════════════════════════════════════════════════════════════════════════
+#  forjaX — X-RAY por parcheo directo de la función (port de cs2-rayoX)
+#
+#  En la dirección del X-Ray hay un "xor al, al" (32 C0).
+#  Escribir "mov al, 1" (B0 01) activa el glow en todos los
+#  jugadores al instante; restaurar "xor al, al" lo apaga.
+#
+#  La dirección se obtiene de DOS formas:
+#   1) Búsqueda de firma en la imagen de client.dll (automática,
+#      sobrevive a parches de Valve mientras la función no cambie).
+#   2) Offset fijo (DESPLAZAMIENTO_XRAY) como respaldo para el
+#      build 14173.
+#
+#  Medidas de discreción:
+#   - Al salir (Ctrl+C / cierre / F2) se restauran los bytes originales.
+#   - Antes de escribir se verifica que la dirección tenga el byte
+#     esperado (0x32), para nunca modificar memoria equivocada.
+#   - La consola puede ocultarse con OCULTAR_CONSOLA en la configuración.
+#
+#  ⚠️ NOTAS SOBRE ForjaFast (bugs/limitaciones sorteadas):
+#   - `constante` global no se resuelve como argumento de funciones
+#     nativas → la configuración son variables locales de main().
+#   - Dentro de funciones CON parámetros, los argumentos de nativas
+#     (literales/variables) llegan corruptos → todo el flujo está
+#     inlined en main() (que no tiene parámetros).
+#   - Se usa _imprimir_stdout en lugar de `escribir` (el builtin
+#     acumula la salida y solo la muestra al terminar el programa).
+#
+#  lococoi — portado a Forja
+# ═════════════════════════════════════════════════════════════════════════
+
+importar proceso_externo
+importar gestor_modulos
+
+# ─────────────────────────────────────────────────────────────────────────
+# Función principal (todo inlined: ver notas sobre ForjaFast arriba)
+# ⚠️ Nada de variables globales: ForjaFast no persiste bien su valor en
+#    bucles (mismo bug que las constantes globales). Todo es local a main().
+# ─────────────────────────────────────────────────────────────────────────
+funcion main() {
+    # Estado del inyector (locales, no globales)
+    variable proceso_del_juego  = nulo
+    variable direccion_del_xray = 0
+    variable xray_activado      = falso
+    # ═══════════════════════════════════════════════════════════════════
+    # CONFIGURACIÓN (ver config.fa para detalles)
+    # ═══════════════════════════════════════════════════════════════════
+    variable NOMBRE_DEL_JUEGO     = "cs2.exe"
+    variable NOMBRE_DEL_MODULO    = "client.dll"
+    variable TECLA_ACTIVAR_XRAY   = 112        # VK_F1 (0x70)
+    variable TECLA_SALIR          = 113        # VK_F2 (0x71)
+    variable INTERVALO_DEL_LOOP_MS     = 10
+    variable INTERVALO_DE_REINTENTO_MS = 1000
+    variable OCULTAR_CONSOLA      = falso
+    variable DESPLAZAMIENTO_XRAY  = 12658217   # 0xC12629 (Build 14173)
+    variable BYTES_XRAY_APAGADO   = [50, 192]  # 0x32, 0xC0 → xor al, al
+    variable BYTES_XRAY_ENCENDIDO = [176, 1]   # 0xB0, 0x01 → mov al, 1
+    variable ERROR_ACCESS_DENIED  = 5
+
+    # FIRMA del X-Ray (decimales): 00 C0 4C 8B A4 24 C8 00 00 00
+    #                              48 8B B4 24 C0 00 00 00
+    #                              48 8B 9C 24 D0 00 00 00
+    variable FIRMA_XRAY = [0, 192, 76, 139, 164, 36, 200, 0, 0, 0,
+                           72, 139, 180, 36, 192, 0, 0, 0,
+                           72, 139, 156, 36, 208, 0, 0, 0]
+
+    # Máscara: falso = comodín (no verificar), verdadero = debe coincidir.
+    # Total: 1 comodín + 25 verificados = 26 (debe coincidir con la firma).
+    variable MASCARA_FIRMA = [falso,
+                              verdadero, verdadero, verdadero, verdadero, verdadero,
+                              verdadero, verdadero, verdadero, verdadero, verdadero,
+                              verdadero, verdadero, verdadero, verdadero, verdadero,
+                              verdadero, verdadero, verdadero, verdadero, verdadero,
+                              verdadero, verdadero, verdadero, verdadero, verdadero]
+
+    # Oculta la consola si está configurado (el proceso sigue activo).
+    _consola_ocultar(OCULTAR_CONSOLA)
+
+    _imprimir_stdout("forjaX — X-Ray para Counter-Strike 2 (port de cs2-rayoX)")
+    _imprimir_stdout("hecho por lococoi")
+    _imprimir_stdout("Esperando proceso: " + NOMBRE_DEL_JUEGO + " ...")
+
+    # ── 1) Esperar a que el juego esté abierto (reintenta cada segundo) ──
+    variable juego = nuevo ProcesoExterno()
+    mientras (no juego.abrir_proceso(NOMBRE_DEL_JUEGO)) {
+        variable codigo_de_error = juego.obtener_codigo_error()
+        si (codigo_de_error == ERROR_ACCESS_DENIED) {
+            _imprimir_stdout("[ERROR] Acceso denegado. Ejecutá como Administrador.")
+            retornar
+        }
+        _temporizador_dormir(INTERVALO_DE_REINTENTO_MS)
+    }
+    proceso_del_juego = juego
+    variable pid_del_juego = juego.obtener_pid()
+    variable handle_del_juego = juego.obtener_handle_interno()
+    _imprimir_stdout("[OK] Proceso encontrado. PID: {pid_del_juego}")
+
+    # ── 2) Obtener el módulo client.dll ──
+    variable gestor = nuevo GestorDeModulos()
+    variable modulo = gestor.obtener_modulo(pid_del_juego, NOMBRE_DEL_MODULO)
+    si (modulo.direccion_base == 0) {
+        _imprimir_stdout("[ERROR] No se encontró el módulo " + NOMBRE_DEL_MODULO + ".")
+        retornar
+    }
+    variable base_del_modulo = modulo.direccion_base
+    variable tamano_del_modulo = modulo.tamano
+    variable base_hex = _entero_a_hex(base_del_modulo, 16)
+    _imprimir_stdout("[OK] {NOMBRE_DEL_MODULO}: 0x{base_hex} ({tamano_del_modulo} bytes)")
+
+    # ── 3) Determinar la dirección del X-Ray: primero por firma, luego fallback ──
+    direccion_del_xray = base_del_modulo + DESPLAZAMIENTO_XRAY
+
+    variable imagen_del_modulo = _proceso_leer_bytes(handle_del_juego, base_del_modulo, tamano_del_modulo)
+    variable desplazamiento_por_firma = _buscar_firma(imagen_del_modulo, FIRMA_XRAY, MASCARA_FIRMA)
+
+    si (desplazamiento_por_firma != -1) {
+        direccion_del_xray = base_del_modulo + desplazamiento_por_firma
+        variable offset_hex = _entero_a_hex(desplazamiento_por_firma, 16)
+        _imprimir_stdout("[OK] X-Ray por firma: {NOMBRE_DEL_MODULO} + 0x{offset_hex}")
+    } sino {
+        variable offset_fijo_hex = _entero_a_hex(DESPLAZAMIENTO_XRAY, 16)
+        _imprimir_stdout("[WARN] Firma no encontrada; usando offset fijo 0x{offset_fijo_hex}")
+    }
+
+    # ── 4) Verificar la dirección antes de usarla ──
+    variable byte_actual = _proceso_leer_bytes(handle_del_juego, direccion_del_xray, 1)
+    si (byte_actual[0] != 50) {   # 0x32 → primer byte de "xor al, al"
+        _imprimir_stdout("[ERROR] La dirección no contiene el patrón esperado (0x32). " +
+                         "Actualizá la firma o el offset en main.fa (ver config.fa).")
+        retornar
+    }
+
+    # ── 5) Registrar la restauración automática al salir (Ctrl+C / cierre) ──
+    variable apagado_0 = BYTES_XRAY_APAGADO[0]
+    variable apagado_1 = BYTES_XRAY_APAGADO[1]
+    _restaurar_al_salir(handle_del_juego, direccion_del_xray, apagado_0, apagado_1)
+
+    # ── 6) Loop principal: activar/desactivar con la tecla (flanco de subida) ──
+    variable tecla_anterior = falso
+    _imprimir_stdout("F1 para activar/desactivar el X-Ray. F2 para salir (restaura bytes).")
+
+    mientras (verdadero) {
+        variable tecla_presionada = _tecla_presionada(TECLA_ACTIVAR_XRAY)
+
+        # Solo alterna en la pulsación, no al mantener la tecla.
+        si (tecla_presionada && no tecla_anterior) {
+            xray_activado = no xray_activado
+
+            si (xray_activado) {
+                variable escritura_ok = _proceso_escribir_bytes(handle_del_juego, direccion_del_xray, BYTES_XRAY_ENCENDIDO)
+                si (no escritura_ok) {
+                    _imprimir_stdout("[ERROR] No se pudo escribir. ¿Se cerró el juego?")
+                    retornar
+                }
+                _imprimir_stdout("[X-RAY] ACTIVADO")
+            } sino {
+                variable escritura_ok2 = _proceso_escribir_bytes(handle_del_juego, direccion_del_xray, BYTES_XRAY_APAGADO)
+                si (no escritura_ok2) {
+                    _imprimir_stdout("[ERROR] No se pudo escribir. ¿Se cerró el juego?")
+                    retornar
+                }
+                _imprimir_stdout("[X-RAY] desactivado")
+            }
+        }
+        tecla_anterior = tecla_presionada
+
+        # Salida limpia: restaura los bytes originales y cierra el handle.
+        si (_tecla_presionada(TECLA_SALIR)) {
+            si (xray_activado && proceso_del_juego != nulo && direccion_del_xray != 0) {
+                _proceso_escribir_bytes(handle_del_juego, direccion_del_xray, BYTES_XRAY_APAGADO)
+                _imprimir_stdout("[OK] Bytes originales restaurados.")
+            }
+            proceso_del_juego.cerrar()
+            _imprimir_stdout("[OK] Saliendo...")
+            retornar
+        }
+
+        _temporizador_dormir(INTERVALO_DEL_LOOP_MS)
+    }
+}
+
+main()

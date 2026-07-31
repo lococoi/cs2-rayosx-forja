@@ -1,0 +1,31 @@
+# ═════════════════════════════════════════════════════════════════════════
+#  forjaX — GESTOR DE MÓDULOS
+#  Obtiene la dirección base y el tamaño de un módulo (client.dll)
+#  cargado en el proceso objetivo.
+#  Equivale a GestorDeModulos de cs2-rayoX (gestor_modulos.cpp).
+#
+#  Funciones nativas del runtime de Forja usadas:
+#    _proceso_modulo_base(pid, nombre)    → Entero (0 si no se encuentra)
+#    _proceso_modulo_tamano(pid, nombre)  → Entero (0 si no se encuentra)
+# ═════════════════════════════════════════════════════════════════════════
+
+clase InfoModulo {
+    direccion_base: Entero
+    tamano: Entero
+
+    constructor() {
+        este.direccion_base = 0
+        este.tamano = 0
+    }
+}
+
+clase GestorDeModulos {
+    # Obtiene la información de un módulo dentro del proceso con `pid`.
+    # Si no se encuentra, devuelve un InfoModulo con base 0 y tamaño 0.
+    funcion obtener_modulo(pid: Entero, nombre: Texto) -> InfoModulo {
+        variable info = nuevo InfoModulo()
+        info.direccion_base = _proceso_modulo_base(pid, nombre)
+        info.tamano = _proceso_modulo_tamano(pid, nombre)
+        retornar info
+    }
+}

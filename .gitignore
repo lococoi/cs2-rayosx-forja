@@ -1,0 +1,22 @@
+# ── Ejecutables y binarios ──
+*.exe
+*.zip
+*.o
+*.obj
+*.pdb
+
+# ── Salida del inyector (build.bat compilar) ──
+forjaX.exe
+
+# ── Forja / Cargo (si se compila localmente) ──
+target/
+Cargo.lock
+
+# ── Archivos temporales y de prueba ──
+*.log
+*_out.txt
+run_out*.txt
+diag_out.txt
+direct_test.txt
+build_test*.txt
+bat_test.txt

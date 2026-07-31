@@ -1,0 +1,72 @@
+# ═════════════════════════════════════════════════════════════════════════
+#  forjaX — PROCESO EXTERNO
+#  Abre un proceso por nombre y expone el handle para leer/escribir
+#  memoria remota (las lecturas/escrituras se hacen con las funciones
+#  nativas _proceso_leer_bytes / _proceso_escribir_bytes directamente).
+#  Equivale a ProcesoExterno de cs2-rayoX (proceso_externo.cpp).
+#
+#  Funciones nativas del runtime de Forja usadas:
+#    _proceso_obtener_pid(nombre)          → Entero (PID o 0)
+#    _proceso_abrir_pid(pid, acceso)       → Entero (handle o 0)
+#    _proceso_ultimo_error()               → Entero (GetLastError)
+#    _proceso_cerrar(h)                    → Booleano
+# ═════════════════════════════════════════════════════════════════════════
+
+clase ProcesoExterno {
+    handle: Entero
+    pid: Entero
+    codigo_error: Entero
+
+    constructor() {
+        este.handle = 0
+        este.pid = 0
+        este.codigo_error = 0
+    }
+
+    # Abre el proceso por nombre de ejecutable (ej: "cs2.exe").
+    # Retorna verdadero si se abrió correctamente; en caso contrario
+    # deja el código de error en obtener_codigo_error().
+    funcion abrir_proceso(nombre: Texto) -> Booleano {
+        variable pid_del_proceso = _proceso_obtener_pid(nombre)
+        si (pid_del_proceso == 0) {
+            este.codigo_error = 0
+            retornar falso
+        }
+
+        variable acceso = 2097151   # PROCESS_ALL_ACCESS (0x001FFFFF)
+        variable handle_del_proceso = _proceso_abrir_pid(pid_del_proceso, acceso)
+        si (handle_del_proceso == 0) {
+            este.codigo_error = _proceso_ultimo_error()
+            retornar falso
+        }
+
+        este.pid = pid_del_proceso
+        este.handle = handle_del_proceso
+        este.codigo_error = 0
+        retornar verdadero
+    }
+
+    funcion obtener_pid() -> Entero {
+        retornar este.pid
+    }
+
+    funcion obtener_codigo_error() -> Entero {
+        retornar este.codigo_error
+    }
+
+    # Handle crudo del proceso (lo usan _proceso_leer_bytes,
+    # _proceso_escribir_bytes y _restaurar_al_salir).
+    funcion obtener_handle_interno() -> Entero {
+        retornar este.handle
+    }
+
+    # Cierra el handle del proceso.
+    funcion cerrar() -> Booleano {
+        si (este.handle != 0) {
+            variable resultado = _proceso_cerrar(este.handle)
+            este.handle = 0
+            retornar resultado
+        }
+        retornar falso
+    }
+}
