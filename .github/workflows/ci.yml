@@ -18,24 +18,29 @@ jobs:
       - name: Checkout cs2-rayosx-forja
         uses: actions/checkout@v4
 
-      # ── 2) Descargar el último release de Forja (forja.exe) ──
+      # ── 2) Descargar el último release de Forja (forja.exe + forja-rt.exe) ──
       #    El release oficial de forja-lang/forja ya incluye las funciones
       #    nativas de Windows que forjaX necesita.
+      #    forja-rt.exe es el stub que `forja compilar` usa para generar el
+      #    .exe autónomo (debe estar junto a forja.exe).
       - name: Descargar ultimo release de Forja
         shell: pwsh
         run: |
           $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/forja-lang/forja/releases/latest' -Headers @{ 'User-Agent' = 'cs2-rayosx-forja' }
-          $asset = $release.assets | Where-Object { $_.name -eq 'forja.exe' } | Select-Object -First 1
-          if (-not $asset) {
-            Write-Error "No se encontro el asset 'forja.exe' en el release $($release.tag_name)"
-            exit 1
+          foreach ($nombre in @('forja.exe', 'forja-rt.exe')) {
+            $asset = $release.assets | Where-Object { $_.name -eq $nombre } | Select-Object -First 1
+            if (-not $asset) {
+              Write-Error "No se encontro el asset '$nombre' en el release $($release.tag_name)"
+              exit 1
+            }
+            Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $nombre
           }
           Write-Output "Usando Forja release: $($release.tag_name)"
-          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile forja.exe
-          Get-Item forja.exe | Select-Object Name, Length
+          Get-Item forja.exe, forja-rt.exe | Select-Object Name, Length
 
       # ── 3) Compilar el inyector a .exe autónomo ──
-      #    `forja compilar` genera un exe con la VM + bytecode embebido.
+      #    `forja compilar` genera un exe con la VM + bytecode embebido,
+      #    usando forja-rt.exe (mismo directorio) como stub.
       - name: Compilar cs2-rayosX-forja.exe
         shell: pwsh
         run: |
