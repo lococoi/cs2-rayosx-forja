@@ -17,15 +17,6 @@
 #     esperado (0x32), para nunca modificar memoria equivocada.
 #   - La consola puede ocultarse con OCULTAR_CONSOLA en la configuración.
 #
-#  ⚠️ NOTAS SOBRE ForjaFast (bugs/limitaciones sorteadas):
-#   - `constante` global no se resuelve como argumento de funciones
-#     nativas → la configuración son variables locales de main().
-#   - Dentro de funciones CON parámetros, los argumentos de nativas
-#     (literales/variables) llegan corruptos → todo el flujo está
-#     inlined en main() (que no tiene parámetros).
-#   - Se usa _imprimir_stdout en lugar de `escribir` (el builtin
-#     acumula la salida y solo la muestra al terminar el programa).
-#
 #  lococoi — portado a Forja
 # ═════════════════════════════════════════════════════════════════════════
 
