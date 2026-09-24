@@ -14,7 +14,7 @@
 #  Medidas de discreción:
 #   - Al salir (Ctrl+C / cierre / F2) se restauran los bytes originales.
 #   - Antes de escribir se verifica que la dirección tenga el byte
-#     esperado (0x32), para nunca modificar memoria equivocada.
+#     esperado (0x32 o 0xB0), para nunca modificar memoria equivocada.
 #   - La consola puede ocultarse con OCULTAR_CONSOLA en la configuración.
 #
 #  lococoi — portado a Forja
@@ -23,46 +23,50 @@
 importar proceso_externo
 importar gestor_modulos
 
+# ═════════════════════════════════════════════════════════════════════════
+# CONFIGURACIÓN (constantes globales de módulo)
+#
+#  ForjaFast v0.8.8+: las variables/constantes globales ya viven en un
+#  espacio de índices propio (global_var_persist, opcodes LoadIdxGlobal /
+#  StoreIdxGlobal). Antes se numeraban desde 0 en cada ámbito y colisionaban
+#  con las locales → valores nulos/corruptos en bucles y funciones.
+# ═════════════════════════════════════════════════════════════════════════
+constante NOMBRE_DEL_JUEGO     = "cs2.exe"
+constante NOMBRE_DEL_MODULO    = "client.dll"
+constante TECLA_ACTIVAR_XRAY   = 112        # VK_F1 (0x70)
+constante TECLA_SALIR          = 113        # VK_F2 (0x71)
+constante INTERVALO_DEL_LOOP_MS     = 10
+constante INTERVALO_DE_REINTENTO_MS = 1000
+constante OCULTAR_CONSOLA      = falso
+constante DESPLAZAMIENTO_XRAY  = 13091513   # C7C2B9  (Build xd)
+constante BYTES_XRAY_APAGADO   = [50, 192]  # 0x32, 0xC0 → xor al, al
+constante BYTES_XRAY_ENCENDIDO = [176, 1]   # 0xB0, 0x01 → mov al, 1
+constante ERROR_ACCESS_DENIED  = 5
+
+# FIRMA del X-Ray (decimales): 00 C0 4C 8B A4 24 C8 00 00 00
+#                              48 8B B4 24 C0 00 00 00
+#                              48 8B 9C 24 D0 00 00 00
+constante FIRMA_XRAY = [0, 192, 76, 139, 164, 36, 200, 0, 0, 0,
+                        72, 139, 180, 36, 192, 0, 0, 0,
+                        72, 139, 156, 36, 208, 0, 0, 0]
+
+# Máscara: falso = comodín (no verificar), verdadero = debe coincidir.
+# Total: 1 comodín + 25 verificados = 26 (debe coincidir con la firma).
+constante MASCARA_FIRMA = [falso,
+                           verdadero, verdadero, verdadero, verdadero, verdadero,
+                           verdadero, verdadero, verdadero, verdadero, verdadero,
+                           verdadero, verdadero, verdadero, verdadero, verdadero,
+                           verdadero, verdadero, verdadero, verdadero, verdadero,
+                           verdadero, verdadero, verdadero, verdadero, verdadero]
+
 # ─────────────────────────────────────────────────────────────────────────
-# Función principal (todo inlined: ver notas sobre ForjaFast arriba)
-# ⚠️ Nada de variables globales: ForjaFast no persiste bien su valor en
-#    bucles (mismo bug que las constantes globales). Todo es local a main().
+# Función principal. El ESTADO del inyector (proceso, dirección, toggle)
+# es local a main(); la CONFIGURACIÓN es constante global (ver arriba).
 # ─────────────────────────────────────────────────────────────────────────
 funcion main() {
-    # Estado del inyector (locales, no globales)
     variable proceso_del_juego  = nulo
     variable direccion_del_xray = 0
     variable xray_activado      = falso
-    # ═══════════════════════════════════════════════════════════════════
-    # CONFIGURACIÓN (ver config.fa para detalles)
-    # ═══════════════════════════════════════════════════════════════════
-    variable NOMBRE_DEL_JUEGO     = "cs2.exe"
-    variable NOMBRE_DEL_MODULO    = "client.dll"
-    variable TECLA_ACTIVAR_XRAY   = 112        # VK_F1 (0x70)
-    variable TECLA_SALIR          = 113        # VK_F2 (0x71)
-    variable INTERVALO_DEL_LOOP_MS     = 10
-    variable INTERVALO_DE_REINTENTO_MS = 1000
-    variable OCULTAR_CONSOLA      = falso
-    variable DESPLAZAMIENTO_XRAY  = 12658217   # 0xC12629 (Build 14173)
-    variable BYTES_XRAY_APAGADO   = [50, 192]  # 0x32, 0xC0 → xor al, al
-    variable BYTES_XRAY_ENCENDIDO = [176, 1]   # 0xB0, 0x01 → mov al, 1
-    variable ERROR_ACCESS_DENIED  = 5
-
-    # FIRMA del X-Ray (decimales): 00 C0 4C 8B A4 24 C8 00 00 00
-    #                              48 8B B4 24 C0 00 00 00
-    #                              48 8B 9C 24 D0 00 00 00
-    variable FIRMA_XRAY = [0, 192, 76, 139, 164, 36, 200, 0, 0, 0,
-                           72, 139, 180, 36, 192, 0, 0, 0,
-                           72, 139, 156, 36, 208, 0, 0, 0]
-
-    # Máscara: falso = comodín (no verificar), verdadero = debe coincidir.
-    # Total: 1 comodín + 25 verificados = 26 (debe coincidir con la firma).
-    variable MASCARA_FIRMA = [falso,
-                              verdadero, verdadero, verdadero, verdadero, verdadero,
-                              verdadero, verdadero, verdadero, verdadero, verdadero,
-                              verdadero, verdadero, verdadero, verdadero, verdadero,
-                              verdadero, verdadero, verdadero, verdadero, verdadero,
-                              verdadero, verdadero, verdadero, verdadero, verdadero]
 
     # Oculta la consola si está configurado (el proceso sigue activo).
     _consola_ocultar(OCULTAR_CONSOLA)
@@ -114,11 +118,19 @@ funcion main() {
     }
 
     # ── 4) Verificar la dirección antes de usarla ──
+    #    Acepta los dos estados válidos: 0x32 (xor al,al → apagado) o
+    #    0xB0 (mov al,1 → encendido, si el juego ya viene parcheado).
     variable byte_actual = _proceso_leer_bytes(handle_del_juego, direccion_del_xray, 1)
-    si (byte_actual[0] != 50) {   # 0x32 → primer byte de "xor al, al"
-        _imprimir_stdout("[ERROR] La dirección no contiene el patrón esperado (0x32). " +
+    si (byte_actual[0] != 50 && byte_actual[0] != 176) {
+        _imprimir_stdout("[ERROR] La dirección no contiene el patrón esperado (0x32 o 0xB0). " +
                          "Actualizá la firma o el offset en main.fa (ver config.fa).")
         retornar
+    }
+    # Sincronizar estado inicial: si el juego ya está parcheado (0xB0),
+    # el X-Ray está activado; evita que un F1 lo apague por desincronización.
+    si (byte_actual[0] == 176) {
+        xray_activado = verdadero
+        _imprimir_stdout("[OK] El juego ya tiene el X-Ray activado (0xB0). Estado sincronizado.")
     }
 
     # ── 5) Registrar la restauración automática al salir (Ctrl+C / cierre) ──
@@ -127,14 +139,13 @@ funcion main() {
     _restaurar_al_salir(handle_del_juego, direccion_del_xray, apagado_0, apagado_1)
 
     # ── 6) Loop principal: activar/desactivar con la tecla (flanco de subida) ──
-    variable tecla_anterior = falso
+    #    _flanco_tecla detecta el flanco en Rust (estado anterior en Rust) y
+    #    recibe la tecla como constante global (fix de globales v0.8.8).
     _imprimir_stdout("F1 para activar/desactivar el X-Ray. F2 para salir (restaura bytes).")
 
     mientras (verdadero) {
-        variable tecla_presionada = _tecla_presionada(TECLA_ACTIVAR_XRAY)
-
-        # Solo alterna en la pulsación, no al mantener la tecla.
-        si (tecla_presionada && no tecla_anterior) {
+        # F1: solo alterna en la pulsación (flanco de subida, en Rust).
+        si (_flanco_tecla(TECLA_ACTIVAR_XRAY)) {
             xray_activado = no xray_activado
 
             si (xray_activado) {
@@ -153,9 +164,8 @@ funcion main() {
                 _imprimir_stdout("[X-RAY] desactivado")
             }
         }
-        tecla_anterior = tecla_presionada
 
-        # Salida limpia: restaura los bytes originales y cierra el handle.
+        # Salida limpia (F2): restaura los bytes originales y cierra el handle.
         si (_tecla_presionada(TECLA_SALIR)) {
             si (xray_activado && proceso_del_juego != nulo && direccion_del_xray != 0) {
                 _proceso_escribir_bytes(handle_del_juego, direccion_del_xray, BYTES_XRAY_APAGADO)
