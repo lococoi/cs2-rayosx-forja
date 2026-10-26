@@ -47,7 +47,7 @@ El finder lee el `rel32`, lo suma a la dirección siguiente al `je` y valida que
 ## Requisitos
 
 - Windows 10/11 **x64**.
-- Ejecutar **como Administrador** (necesario para `PROCESS_ALL_ACCESS`).
+- Ejecutar (**como Administrador solo cuando sea necesario**).
 
 ## Uso (ejecutable precompilado)
 
