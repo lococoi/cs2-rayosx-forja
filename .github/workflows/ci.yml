@@ -1,13 +1,23 @@
 name: CI - Compilar forjaX y publicar Release
 
+# Disparadores:
+#  - push a master/main (cambios de código) → publica/actualiza la Release "latest"
+#  - push de un tag vX.Y                   → publica una Release versionada
+#  - workflow_dispatch                     → publica/actualiza la Release "latest"
 on:
   push:
-    branches: [main]
+    branches: [master, main]
     tags: ['v*']
   workflow_dispatch:
 
 permissions:
   contents: write
+
+# Serializa los runs de la misma rama/tag para que dos pushes seguidos
+# no suban assets a la misma Release al mismo tiempo.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -63,13 +73,51 @@ jobs:
             cs2-rayosX-forja.exe
             cs2-rayosX-forja.zip
 
-      # ── 6) Publicar Release (solo al pushear un tag vX.Y) ──
+      # ── 6) Publicar Release en cada cambio de código ──
+      #    - tag vX.Y    → Release versionada con ese tag.
+      #    - master/main → Release rodante "latest" (se actualiza en cada push).
       - name: Publicar Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            cs2-rayosX-forja.exe
-            cs2-rayosX-forja.zip
-          name: Release ${{ github.ref_name }}
-          generate_release_notes: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          COMMIT_URL="https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            TAG="${GITHUB_REF_NAME}"
+            TITLE="cs2-rayosX-forja ${TAG}"
+            NOTES="Release ${TAG}. Commit: ${COMMIT_URL}"
+          else
+            TAG="latest"
+            TITLE="cs2-rayosX-forja build ${SHORT_SHA}"
+            NOTES="Build automático de ${SHORT_SHA} (${GITHUB_REF_NAME}). Commit: ${COMMIT_URL}"
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" cs2-rayosX-forja.exe cs2-rayosX-forja.zip --clobber
+            gh release edit "$TAG" \
+              --title "$TITLE" \
+              --notes "$NOTES" \
+              --draft=false \
+              --prerelease=false \
+              --latest
+          else
+            if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+              gh release create "$TAG" cs2-rayosX-forja.exe cs2-rayosX-forja.zip \
+                --title "$TITLE" \
+                --notes "$NOTES" \
+                --draft=false \
+                --latest
+            else
+              gh release create "$TAG" cs2-rayosX-forja.exe cs2-rayosX-forja.zip \
+                --title "$TITLE" \
+                --notes "$NOTES" \
+                --draft=false \
+                --prerelease=false \
+                --latest
+            fi
+          fi

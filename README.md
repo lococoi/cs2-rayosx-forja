@@ -51,7 +51,7 @@ El finder lee el `rel32`, lo suma a la dirección siguiente al `je` y valida que
 
 ## Uso (ejecutable precompilado)
 
-Descargá `cs2-rayosX-forja.exe` de la [Release](https://github.com/forja-lang/cs2-rayosx-forja/releases), ejecutalo con CS2 abierto y presioná **F1**.
+Descargá `cs2-rayosX-forja.exe` de la [Release](https://github.com/lococoi/cs2-rayosx-forja/releases), ejecutalo con CS2 abierto y presioná **F1**.
 
 ## Compilación
 
@@ -61,7 +61,7 @@ El [workflow de CI](.github/workflows/ci.yml) descarga el **último release ofic
 forja.exe compilar main.fa -o cs2-rayosX-forja.exe
 ```
 
-Genera el `.exe` autónomo (VM + bytecode embebido) y, al pushear un tag `vX.Y`, publica la **Release** con el `.exe` y el `.zip`.
+Genera el `.exe` autónomo (VM + bytecode embebido).
 
 Localmente, con un Forja que tenga las nativas:
 
