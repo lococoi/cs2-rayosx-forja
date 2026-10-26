@@ -29,23 +29,22 @@ jobs:
         uses: actions/checkout@v4
 
       # ── 2) Descargar el último release de Forja (forja.exe + forja-rt.exe) ──
-      #    El release oficial de forja-lang/forja ya incluye las funciones
-      #    nativas de Windows que forjaX necesita.
+      #    Se usan las URLs de latest/download para no consumir la API de
+      #    GitHub (la API sin autenticar devuelve 403 por rate limit en los
+      #    runners compartidos).
       #    forja-rt.exe es el stub que `forja compilar` usa para generar el
       #    .exe autónomo (debe estar junto a forja.exe).
       - name: Descargar ultimo release de Forja
         shell: pwsh
         run: |
-          $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/forja-lang/forja/releases/latest' -Headers @{ 'User-Agent' = 'cs2-rayosx-forja' }
+          $base = 'https://github.com/forja-lang/forja/releases/latest/download'
           foreach ($nombre in @('forja.exe', 'forja-rt.exe')) {
-            $asset = $release.assets | Where-Object { $_.name -eq $nombre } | Select-Object -First 1
-            if (-not $asset) {
-              Write-Error "No se encontro el asset '$nombre' en el release $($release.tag_name)"
+            Invoke-WebRequest -Uri "$base/$nombre" -OutFile $nombre
+            if (-not (Test-Path $nombre)) {
+              Write-Error "No se pudo descargar '$nombre' desde $base"
               exit 1
             }
-            Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $nombre
           }
-          Write-Output "Usando Forja release: $($release.tag_name)"
           Get-Item forja.exe, forja-rt.exe | Select-Object Name, Length
 
       # ── 3) Compilar el inyector a .exe autónomo ──
