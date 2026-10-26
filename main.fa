@@ -5,16 +5,16 @@
 #  Escribir "mov al, 1" (B0 01) activa el glow en todos los
 #  jugadores al instante; restaurar "xor al, al" lo apaga.
 #
-#  La dirección se obtiene de DOS formas:
-#   1) Búsqueda de firma en la imagen de client.dll (automática,
-#      sobrevive a parches de Valve mientras la función no cambie).
-#   2) Offset fijo (DESPLAZAMIENTO_XRAY) como respaldo para el
-#      build 14173.
+#  La dirección se obtiene de TRES formas:
+#   1) Acceso al flag + salto relativo (cmp [rax+58],0; je rel32)
+#      en la imagen de client.dll; no depende del epílogo.
+#   2) Búsqueda del epílogo del X-Ray como ancla específica.
+#   3) Offset fijo (DESPLAZAMIENTO_XRAY) como último recurso.
 #
 #  Medidas de discreción:
 #   - Al salir (Ctrl+C / cierre / F2) se restauran los bytes originales.
-#   - Antes de escribir se verifica que la dirección tenga el byte
-#     esperado (0x32 o 0xB0), para nunca modificar memoria equivocada.
+#   - Antes de escribir se verifica que la dirección tenga el patrón
+#     esperado (32/30 C0 o B0 01), para no modificar memoria equivocada.
 #   - La consola puede ocultarse con OCULTAR_CONSOLA en la configuración.
 #
 #  lococoi — portado a Forja
@@ -38,26 +38,73 @@ constante TECLA_SALIR          = 113        # VK_F2 (0x71)
 constante INTERVALO_DEL_LOOP_MS     = 10
 constante INTERVALO_DE_REINTENTO_MS = 1000
 constante OCULTAR_CONSOLA      = falso
-constante DESPLAZAMIENTO_XRAY  = 13095705   # C7D319  (Build xd)
+constante DESPLAZAMIENTO_XRAY  = 13102182   # 0xC7EC66 (build actual)
 constante BYTES_XRAY_APAGADO   = [50, 192]  # 0x32, 0xC0 → xor al, al
 constante BYTES_XRAY_ENCENDIDO = [176, 1]   # 0xB0, 0x01 → mov al, 1
 constante ERROR_ACCESS_DENIED  = 5
 
-# FIRMA del X-Ray (decimales): 00 C0 4C 8B A4 24 C8 00 00 00
-#                              48 8B B4 24 C0 00 00 00
-#                              48 8B 9C 24 D0 00 00 00
-constante FIRMA_XRAY = [0, 192, 76, 139, 164, 36, 200, 0, 0, 0,
-                        72, 139, 180, 36, 192, 0, 0, 0,
-                        72, 139, 156, 36, 208, 0, 0, 0]
+# FIRMA 1 — acceso al flag al inicio de la función:
+#   83 78 58 00        cmp dword ptr [rax+58], 0
+#   0F 84 ?? ?? ?? ??  je rel32
+# El destino del je ES la dirección del X-Ray.
+constante FIRMA_ACCESO_XRAY = [131, 120, 88, 0, 15, 132, 0, 0, 0, 0]
 
 # Máscara: falso = comodín (no verificar), verdadero = debe coincidir.
-# Total: 1 comodín + 25 verificados = 26 (debe coincidir con la firma).
-constante MASCARA_FIRMA = [falso,
+# 6 bytes fijos + 4 del rel32 comodín = 10.
+constante MASCARA_ACCESO = [verdadero, verdadero, verdadero, verdadero, verdadero, verdadero,
+                            falso, falso, falso, falso]
+
+# FIRMA 2 — epílogo del X-Ray (build actual):
+#   32 C0                    xor al, al  ← el objetivo
+#   4C 8D 9C 24 90 00 00 00  lea r11, [rsp+90]
+#   49 8B 5B 30              mov rbx, [r11+30]
+#   49 8B 73 38              mov rsi, [r11+38]
+#   49 8B 7B 40              mov rdi, [r11+40]
+constante FIRMA_XRAY = [50, 192,
+                        76, 141, 156, 36, 144, 0, 0, 0,
+                        73, 139, 91, 48,
+                        73, 139, 115, 56,
+                        73, 139, 123, 64]
+
+# 22 bytes exactos: todos se verifican.
+constante MASCARA_FIRMA = [verdadero, verdadero, verdadero, verdadero, verdadero, verdadero,
                            verdadero, verdadero, verdadero, verdadero, verdadero,
                            verdadero, verdadero, verdadero, verdadero, verdadero,
-                           verdadero, verdadero, verdadero, verdadero, verdadero,
-                           verdadero, verdadero, verdadero, verdadero, verdadero,
-                           verdadero, verdadero, verdadero, verdadero, verdadero]
+                           verdadero, verdadero, verdadero, verdadero, verdadero, verdadero]
+
+# ─────────────────────────────────────────────────────────────────────────
+# Sigue el salto relativo del acceso al flag y devuelve el offset del
+# "xor al, al" objetivo, o -1 si no se puede resolver.
+# ─────────────────────────────────────────────────────────────────────────
+funcion buscar_por_acceso(imagen, tamano) -> Entero {
+    variable posicion = _buscar_firma(imagen, FIRMA_ACCESO_XRAY, MASCARA_ACCESO)
+    si (posicion == -1 || posicion + 10 > tamano) {
+        retornar -1
+    }
+
+    # rel32 en posicion+6; la instrucción siguiente al je, en posicion+10.
+    variable b0 = imagen[posicion + 6]
+    variable b1 = imagen[posicion + 7]
+    variable b2 = imagen[posicion + 8]
+    variable b3 = imagen[posicion + 9]
+    variable rel = b0 + b1 * 256 + b2 * 65536 + b3 * 16777216
+    si (rel >= 2147483648) {
+        rel = rel - 4294967296
+    }
+
+    variable objetivo = posicion + 10 + rel
+    si (objetivo <= posicion || objetivo + 1 >= tamano) {
+        retornar -1
+    }
+
+    variable primer_byte = imagen[objetivo]
+    variable segundo_byte = imagen[objetivo + 1]
+    si ((primer_byte == 50 || primer_byte == 48) && segundo_byte == 192) {
+        retornar objetivo
+    }
+
+    retornar -1
+}
 
 # ─────────────────────────────────────────────────────────────────────────
 # Función principal. El ESTADO del inyector (proceso, dirección, toggle)
@@ -102,35 +149,63 @@ funcion main() {
     variable base_hex = _entero_a_hex(base_del_modulo, 16)
     _imprimir_stdout("[OK] {NOMBRE_DEL_MODULO}: 0x{base_hex} ({tamano_del_modulo} bytes)")
 
-    # ── 3) Determinar la dirección del X-Ray: primero por firma, luego fallback ──
+    # ── 3) Determinar la dirección del X-Ray ──
+    #    Epílogo (22 bytes) + acceso+salto; si coinciden, mejor confianza.
     direccion_del_xray = base_del_modulo + DESPLAZAMIENTO_XRAY
 
     variable imagen_del_modulo = _proceso_leer_bytes(handle_del_juego, base_del_modulo, tamano_del_modulo)
-    variable desplazamiento_por_firma = _buscar_firma(imagen_del_modulo, FIRMA_XRAY, MASCARA_FIRMA)
+    variable offset_epilogo = _buscar_firma(imagen_del_modulo, FIRMA_XRAY, MASCARA_FIRMA)
+    variable offset_acceso = buscar_por_acceso(imagen_del_modulo, tamano_del_modulo)
 
-    si (desplazamiento_por_firma != -1) {
-        direccion_del_xray = base_del_modulo + desplazamiento_por_firma
-        variable offset_hex = _entero_a_hex(desplazamiento_por_firma, 16)
-        _imprimir_stdout("[OK] X-Ray por firma: {NOMBRE_DEL_MODULO} + 0x{offset_hex}")
+    variable metodo = ""
+    variable desplazamiento_encontrado = -1
+
+    si (offset_epilogo != -1 && offset_acceso != -1) {
+        si (offset_epilogo == offset_acceso) {
+            desplazamiento_encontrado = offset_epilogo
+            metodo = "acceso + epílogo (coinciden)"
+        } sino {
+            # El epílogo es más específico.
+            desplazamiento_encontrado = offset_epilogo
+            metodo = "epílogo (el acceso no coincide)"
+        }
+    } sino si (offset_epilogo != -1) {
+        desplazamiento_encontrado = offset_epilogo
+        metodo = "epílogo"
+    } sino si (offset_acceso != -1) {
+        desplazamiento_encontrado = offset_acceso
+        metodo = "acceso (cmp+je)"
+    }
+
+    si (desplazamiento_encontrado != -1) {
+        direccion_del_xray = base_del_modulo + desplazamiento_encontrado
+        variable offset_hex = _entero_a_hex(desplazamiento_encontrado, 16)
+        _imprimir_stdout("[OK] X-Ray por {metodo}: {NOMBRE_DEL_MODULO} + 0x{offset_hex}")
     } sino {
         variable offset_fijo_hex = _entero_a_hex(DESPLAZAMIENTO_XRAY, 16)
         _imprimir_stdout("[WARN] Firma no encontrada; usando offset fijo 0x{offset_fijo_hex}")
     }
 
     # ── 4) Verificar la dirección antes de usarla ──
-    #    Acepta los dos estados válidos: 0x32 (xor al,al → apagado) o
-    #    0xB0 (mov al,1 → encendido, si el juego ya viene parcheado).
-    variable byte_actual = _proceso_leer_bytes(handle_del_juego, direccion_del_xray, 1)
-    si (byte_actual[0] != 50 && byte_actual[0] != 176) {
-        _imprimir_stdout("[ERROR] La dirección no contiene el patrón esperado (0x32 o 0xB0). " +
-                         "Actualizá la firma o el offset en main.fa (ver config.fa).")
+    #    Estados válidos:
+    #      32 C0 / 30 C0 → xor al, al (apagado)
+    #      B0 01         → mov al, 1  (ya parcheado)
+    variable bytes_actuales = _proceso_leer_bytes(handle_del_juego, direccion_del_xray, 2)
+    variable primer_byte = bytes_actuales[0]
+    variable segundo_byte = bytes_actuales[1]
+    variable es_xor = (primer_byte == 50 || primer_byte == 48) && segundo_byte == 192
+    variable es_mov = primer_byte == 176 && segundo_byte == 1
+
+    si (no es_xor && no es_mov) {
+        _imprimir_stdout("[ERROR] La dirección no contiene el patrón esperado (32/30 C0 o B0 01). " +
+                         "Actualizá la firma o el offset en main.fa.")
         retornar
     }
-    # Sincronizar estado inicial: si el juego ya está parcheado (0xB0),
+    # Sincronizar estado inicial: si el juego ya está parcheado (B0 01),
     # el X-Ray está activado; evita que un F1 lo apague por desincronización.
-    si (byte_actual[0] == 176) {
+    si (es_mov) {
         xray_activado = verdadero
-        _imprimir_stdout("[OK] El juego ya tiene el X-Ray activado (0xB0). Estado sincronizado.")
+        _imprimir_stdout("[OK] El juego ya tiene el X-Ray activado (B0 01). Estado sincronizado.")
     }
 
     # ── 5) Registrar la restauración automática al salir (Ctrl+C / cierre) ──
